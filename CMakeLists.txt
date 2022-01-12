@@ -3,11 +3,12 @@ cmake_minimum_required(VERSION 3.5)
 project(minesweeper_solver)
 
 # source files
-set(SOURCES src/controller.cpp)
+set(SOURCES ${PROJECT_SOURCE_DIR}/src/controller.cpp)
 add_executable(minesweeper_solver ${SOURCES})
 
 # defined headers
-set(HEADERS ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include)
+set(HEADERS ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/include
+            ${PROJECT_SOURCE_DIR}/src/util)
 target_include_directories(minesweeper_solver PRIVATE ${HEADERS})
 
 # load libraries

@@ -3,9 +3,15 @@
 #include <windows.h>
 
 #include <cstdio>
-#include <iostream>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc.hpp>
 #include <opencv2/opencv.hpp>
 #include <vector>
+
+#include "util/util.hpp"
+
+namespace minesweeper_solver
+{
 
 Controller::Controller():
   handle_main(FindWindow(NULL, "Minesweeper")),
@@ -16,7 +22,10 @@ Controller::Controller():
 
 void Controller::update_window_info()
 {
-  GetWindowRect(this->handle_inner, &this->window_size);
+  GetWindowRect(this->handle_inner, &this->window_rect);
+  this->window_size =
+    std::make_pair(this->window_rect.right - this->window_rect.left,
+      this->window_rect.bottom - this->window_rect.top);
 }
 
 void Controller::focus()
@@ -28,8 +37,8 @@ cv::Mat Controller::get_screenshot()
 {
   this->update_window_info();
 
-  int width = this->window_size.right - this->window_size.left;
-  int height = this->window_size.bottom - this->window_size.top;
+  int width = this->window_size.first;
+  int height = this->window_size.second;
 
   LPVOID img = new char[width * height * 4];
 
@@ -52,16 +61,106 @@ cv::Mat Controller::get_screenshot()
   return screenshot;
 }
 
+void Controller::analyze_screenshot(const cv::Mat& s)
+{
+  analyze_screenshot_dimension(s);
+}
+
+void Controller::analyze_screenshot_dimension(const cv::Mat& s)
+{
+  using namespace cv;
+
+  Mat img_gray, img_erode, img_threshold;
+
+  Mat hl; // horizontal line
+  Mat vl; // vertical line
+  Mat img_mask, img_joints;
+
+  /* step 1. get gray image and adaptive threshold image */
+  // get gray image
+  cvtColor(s, img_gray, COLOR_BGR2GRAY);
+  // get adaptive threshold image form gray image
+  adaptiveThreshold(~img_gray, img_threshold, 255, ADAPTIVE_THRESH_MEAN_C,
+    THRESH_BINARY, 15, -2);
+
+  /* step 2. sperate line by applying erode then dilate */
+  // sperate line scale, the bigger the more lines would be detected
+  int scale = 20;
+  // sperate horizontal line
+  hl = img_threshold.clone();
+  Mat hs = getStructuringElement(MORPH_RECT, Size(hl.cols / scale, 1));
+  erode(hl, hl, hs, Point(-1, -1));
+  dilate(hl, hl, hs, Point(-1, -1));
+  // sperate vertical line
+  vl = img_threshold.clone();
+  Mat vs = getStructuringElement(MORPH_RECT, Size(1, vl.rows / scale));
+  erode(vl, vl, vs, Point(-1, -1));
+  dilate(vl, vl, vs, Point(-1, -1));
+
+  /* step 3. get intersection joints of horizontal and vertical line, count them
+  to determine row and column count. */
+  /* TODO: add more comments for this method */
+  int row = 0, column = 0;
+  // do intersection to horizontal and vertical line, get joints
+  bitwise_and(hl, vl, img_joints);
+
+  // the gap between blocks, depended on the size of each block
+  int gap = 10;
+  // counting horizontal joints for row count
+  std::vector<int> counts;
+  for (int i = 0; i < img_joints.cols; ++i)
+  {
+    int count = 0;
+    for (int j = 0; j < img_joints.rows; ++j)
+    {
+      if (img_joints.at<uint8_t>(j, i) > 0)
+      {
+        ++count;
+        j += gap; // jump the gap
+      }
+    }
+    if (count > 0)
+    {
+      counts.push_back(count);
+    }
+  }
+  row = util::get_majority_number(counts, this->window_size.second) - 1;
+
+  // counting vertical joints for column count
+  counts = std::vector<int>();
+  for (int i = 0; i < img_joints.rows; ++i)
+  {
+    int count = 0;
+    for (int j = 0; j < img_joints.cols; ++j)
+    {
+      if (img_joints.at<uint8_t>(i, j) > 0)
+      {
+        ++count;
+        j += gap; // jump one gap
+      }
+    }
+    if (count > 0)
+    {
+      counts.push_back(count);
+    }
+  }
+  column = util::get_majority_number(counts, this->window_size.second) - 1;
+
+  this->map_size = std::make_pair(column, row);
+}
+
 std::vector<byte> Controller::get_map()
 {
-  get_screenshot();
+  cv::Mat screenshot = this->get_screenshot();
+  this->analyze_screenshot(screenshot);
+  printf("width: %d, height: %d", this->map_size.first, this->map_size.second);
   return std::vector<byte>();
 }
 
 void Controller::click(int x, int y)
 {
   SetCursorPos(
-    this->window_size.left + 39 + x * 18, this->window_size.top + 39 + y * 18);
+    this->window_rect.left + 39 + x * 18, this->window_rect.top + 39 + y * 18);
   mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
   mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
 }
@@ -76,12 +175,14 @@ void Controller::test()
     Sleep(1000);
   }
 }
+} // namespace minesweeper_solver
 
 int main()
 {
+  using namespace minesweeper_solver;
   Controller c = Controller();
-
   auto test = c.get_map();
+
   // c.focus();
 
   // Sleep(100);

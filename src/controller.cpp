@@ -17,7 +17,9 @@ Controller::Controller():
   handle_main(FindWindow(NULL, "Minesweeper")),
   handle_inner(FindWindowEx(this->handle_main, NULL, "Static", NULL))
 {
-  update_window_info();
+  this->update_window_info();
+  cv::Mat screenshot = this->get_screenshot();
+  this->analyze_screenshot_dimension(screenshot);
 }
 
 void Controller::update_window_info()
@@ -52,7 +54,7 @@ cv::Mat Controller::get_screenshot()
   GetBitmapBits(bitmap, width * height * 4, img);
 
   cv::Mat screenshot = cv::Mat(height, width, CV_8UC4, img);
-  cv::imwrite("screenshot.jpg", screenshot);
+  // cv::imwrite("screenshot.jpg", screenshot);
 
   DeleteDC(window_DC);
   DeleteDC(memory_DC);
@@ -61,16 +63,11 @@ cv::Mat Controller::get_screenshot()
   return screenshot;
 }
 
-void Controller::analyze_screenshot(const cv::Mat& s)
-{
-  analyze_screenshot_dimension(s);
-}
-
 void Controller::analyze_screenshot_dimension(const cv::Mat& s)
 {
   using namespace cv;
 
-  Mat img_gray, img_erode, img_threshold;
+  Mat img_gray, img_threshold;
 
   Mat hl; // horizontal line
   Mat vl; // vertical line
@@ -98,9 +95,12 @@ void Controller::analyze_screenshot_dimension(const cv::Mat& s)
   dilate(vl, vl, vs, Point(-1, -1));
 
   /* step 3. get intersection joints of horizontal and vertical line, count them
-  to determine row and column count. */
+  to determine row and column count, determine block size and map offsets at the
+  same time. */
   /* TODO: add more comments for this method */
-  int row = 0, column = 0;
+  int row, column, block_width, block_height;
+  Point top_left, bottom_right;
+  bool is_top_left_found = false;
   // do intersection to horizontal and vertical line, get joints
   bitwise_and(hl, vl, img_joints);
 
@@ -116,6 +116,12 @@ void Controller::analyze_screenshot_dimension(const cv::Mat& s)
       if (img_joints.at<uint8_t>(j, i) > 0)
       {
         ++count;
+        if (!is_top_left_found)
+        {
+          top_left = {i, j};
+          is_top_left_found = true;
+        }
+        bottom_right = {i, j};
         j += gap; // jump the gap
       }
     }
@@ -147,20 +153,39 @@ void Controller::analyze_screenshot_dimension(const cv::Mat& s)
   column = util::get_majority_number(counts, this->window_size.second) - 1;
 
   this->map_size = std::make_pair(column, row);
+  this->map_offset = std::make_pair(top_left.x, top_left.y);
+  this->block_size = std::make_pair<int, int>(
+    round((bottom_right.x - top_left.x) / (double)column),
+    round((bottom_right.y - top_left.y) / (double)row));
+
+  // printf("top_left: (%d, %d), bottom_right: (%d, %d)\n", top_left.x,
+  // top_left.y,
+  //   bottom_right.x, bottom_right.y);
+  // printf(
+  //   "width: %d, height: %d\n", this->map_size.first, this->map_size.second);
+  // printf("offset x: %d, offset y: %d\n", this->map_offset.first,
+  //   this->map_offset.second);
+  // printf("block width: %d, block height: %d\n", this->block_size.first,
+  //   this->block_size.second);
+}
+
+void Controller::analyze_screenshot_map(const cv::Mat&)
+{
 }
 
 std::vector<byte> Controller::get_map()
 {
-  cv::Mat screenshot = this->get_screenshot();
-  this->analyze_screenshot(screenshot);
-  printf("width: %d, height: %d", this->map_size.first, this->map_size.second);
   return std::vector<byte>();
 }
 
 void Controller::click(int x, int y)
 {
-  SetCursorPos(
-    this->window_rect.left + 39 + x * 18, this->window_rect.top + 39 + y * 18);
+  focus();
+  int click_x = this->window_rect.left + this->block_size.first / 2 +
+                this->map_offset.first + x * this->block_size.first,
+      click_y = this->window_rect.top + this->block_size.second / 2 +
+                this->map_offset.second + x * this->block_size.second;
+  SetCursorPos(click_x, click_y);
   mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
   mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
 }
@@ -183,7 +208,7 @@ int main()
   Controller c = Controller();
   auto test = c.get_map();
 
-  // c.focus();
+  c.click(0, 0);
 
   // Sleep(100);
   // for (int i = 0; i < 10 && GetForegroundWindow() == c.hm; ++i)

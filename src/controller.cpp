@@ -3,8 +3,6 @@
 #include <windows.h>
 
 #include <cstdio>
-#include <opencv2/highgui/highgui.hpp>
-#include <opencv2/imgproc.hpp>
 #include <opencv2/opencv.hpp>
 #include <vector>
 
@@ -24,10 +22,10 @@ Controller::Controller():
 
 void Controller::update_window_info()
 {
-  GetWindowRect(this->handle_inner, &this->window_rect);
-  this->window_size =
-    std::make_pair(this->window_rect.right - this->window_rect.left,
-      this->window_rect.bottom - this->window_rect.top);
+  RECT w;
+  GetWindowRect(this->handle_inner, &w);
+  this->window_rect =
+    cv::Rect(w.left, w.right, w.right - w.left, w.bottom - w.top);
 }
 
 void Controller::focus()
@@ -39,8 +37,8 @@ cv::Mat Controller::get_screenshot()
 {
   this->update_window_info();
 
-  int width = this->window_size.first;
-  int height = this->window_size.second;
+  int width = this->window_rect.width;
+  int height = this->window_rect.height;
 
   LPVOID img = new char[width * height * 4];
 
@@ -65,24 +63,26 @@ cv::Mat Controller::get_screenshot()
 
 void Controller::analyze_screenshot_dimension(const cv::Mat& s)
 {
+  // reference: https://blog.csdn.net/yomo127/article/details/52045146
   using namespace cv;
 
+  /* step 1:
+    get gray image and adaptive threshold image
+  */
   Mat img_gray, img_threshold;
-
-  Mat hl; // horizontal line
-  Mat vl; // vertical line
-  Mat img_mask, img_joints;
-
-  /* step 1. get gray image and adaptive threshold image */
   // get gray image
   cvtColor(s, img_gray, COLOR_BGR2GRAY);
   // get adaptive threshold image form gray image
   adaptiveThreshold(~img_gray, img_threshold, 255, ADAPTIVE_THRESH_MEAN_C,
     THRESH_BINARY, 15, -2);
 
-  /* step 2. sperate line by applying erode then dilate */
+  /* step 2:
+    sperate line by applying erode then dilate
+  */
+  Mat hl; // horizontal line
+  Mat vl; // vertical line
   // sperate line scale, the bigger the more lines would be detected
-  int scale = 20;
+  int scale = 15;
   // sperate horizontal line
   hl = img_threshold.clone();
   Mat hs = getStructuringElement(MORPH_RECT, Size(hl.cols / scale, 1));
@@ -94,18 +94,61 @@ void Controller::analyze_screenshot_dimension(const cv::Mat& s)
   erode(vl, vl, vs, Point(-1, -1));
   dilate(vl, vl, vs, Point(-1, -1));
 
-  /* step 3. get intersection joints of horizontal and vertical line, count them
-  to determine row and column count, determine block size and map offsets at the
-  same time. */
-  /* TODO: add more comments for this method */
+  /* step 3
+    get mask and joint.
+  */
+  Mat img_mask = hl + vl;
+  Mat img_joints;
   int row, column, block_width, block_height;
-  Point top_left, bottom_right;
-  bool is_top_left_found = false;
   // do intersection to horizontal and vertical line, get joints
   bitwise_and(hl, vl, img_joints);
+  Point top_left, bottom_right;
+  /* step 4
+    get intersection joints of horizontal and vertical line, count them
+    to determine row and column count, determine block size and map offsets at
+    the same time.
+  */
+  std::vector<std::vector<Point> > contours;
+  std::vector<Vec4i> hierarchy;
+  findContours(img_mask, contours, hierarchy, RETR_EXTERNAL,
+    CHAIN_APPROX_SIMPLE, Point(0, 0));
+
+  std::vector<cv::Rect> tables;
+  for (size_t i = 0; i < contours.size(); i++)
+  {
+    // filter small contours
+    if (contourArea(contours[i]) > 100)
+    {
+      cv::Rect bound_rect;
+      std::vector<Point> contour_poly;
+      approxPolyDP(Mat(contours[i]), contour_poly, 3, true);
+      bound_rect = boundingRect(Mat(contour_poly));
+
+      // find the number of joints that each table has
+      Mat roi = img_joints(bound_rect);
+      std::vector<std::vector<Point> > joints_contours;
+      findContours(roi, joints_contours, RETR_CCOMP, CHAIN_APPROX_SIMPLE);
+      //从表格的特性看，如果这片区域的点数小于4，那就代表没有一个完整的表格，忽略掉
+      if (joints_contours.size() > 4)
+      {
+        tables.push_back(bound_rect);
+      }
+    }
+  }
+  int max = 0;
+  for (int i = 0; i < tables.size(); ++i)
+  {
+    if (tables[i].area() > tables[max].area())
+    {
+      max = i;
+    }
+  }
+  this->map_rect = tables[max];
+
+  /* TODO: add more comments for this method */
 
   // the gap between blocks, depended on the size of each block
-  int gap = 10;
+  int gap = 5;
   // counting horizontal joints for row count
   std::vector<int> counts;
   for (int i = 0; i < img_joints.cols; ++i)
@@ -116,12 +159,6 @@ void Controller::analyze_screenshot_dimension(const cv::Mat& s)
       if (img_joints.at<uint8_t>(j, i) > 0)
       {
         ++count;
-        if (!is_top_left_found)
-        {
-          top_left = {i, j};
-          is_top_left_found = true;
-        }
-        bottom_right = {i, j};
         j += gap; // jump the gap
       }
     }
@@ -130,7 +167,7 @@ void Controller::analyze_screenshot_dimension(const cv::Mat& s)
       counts.push_back(count);
     }
   }
-  row = util::get_majority_number(counts, this->window_size.second) - 1;
+  row = util::get_majority_number(counts, this->window_rect.height) - 1;
 
   // counting vertical joints for column count
   counts = std::vector<int>();
@@ -142,7 +179,7 @@ void Controller::analyze_screenshot_dimension(const cv::Mat& s)
       if (img_joints.at<uint8_t>(i, j) > 0)
       {
         ++count;
-        j += gap; // jump one gap
+        j += gap; // jump the gap
       }
     }
     if (count > 0)
@@ -150,41 +187,94 @@ void Controller::analyze_screenshot_dimension(const cv::Mat& s)
       counts.push_back(count);
     }
   }
-  column = util::get_majority_number(counts, this->window_size.second) - 1;
+  column = util::get_majority_number(counts, this->window_rect.width) - 1;
 
-  this->map_size = std::make_pair(column, row);
-  this->map_offset = std::make_pair(top_left.x, top_left.y);
-  this->block_size = std::make_pair<int, int>(
-    round((bottom_right.x - top_left.x) / (double)column),
-    round((bottom_right.y - top_left.y) / (double)row));
-
-  // printf("top_left: (%d, %d), bottom_right: (%d, %d)\n", top_left.x,
-  // top_left.y,
-  //   bottom_right.x, bottom_right.y);
-  // printf(
-  //   "width: %d, height: %d\n", this->map_size.first, this->map_size.second);
-  // printf("offset x: %d, offset y: %d\n", this->map_offset.first,
-  //   this->map_offset.second);
-  // printf("block width: %d, block height: %d\n", this->block_size.first,
-  //   this->block_size.second);
+  this->map_size.width = column;
+  this->map_size.height = row;
+  this->block_size.width = round(this->map_rect.width / (double)column);
+  this->block_size.height = round(this->map_rect.height / (double)row);
 }
 
-void Controller::analyze_screenshot_map(const cv::Mat&)
+void Controller::analyze_screenshot_map(const cv::Mat& screenshot)
 {
+  int map_width = this->map_size.width, map_height = this->map_size.height;
+  int map_offset_x = this->map_rect.x + 4, map_offset_y = this->map_rect.y + 4;
+  int block_width = this->block_size.width,
+      block_height = this->block_size.height;
+
+  // initialize by creating zero row for the later operation of row concat
+  // zero row will be removed after data loaded
+  cv::Mat all_block = cv::Mat::zeros(1, 14 * 14, CV_32F);
+  for (int i = 0; i < map_height; ++i)
+  {
+    for (int j = 0; j < map_width; ++j)
+    {
+      cv::Mat img, img_gray, img_row;
+      img = screenshot(cv::Rect(map_offset_x + block_width * j,
+        map_offset_y + block_height * i, block_width - 4, block_height - 4));
+      if (img.rows != 14 or img.cols != 14)
+      {
+        cv::resize(img, img, cv::Size(14, 14));
+      }
+      cv::cvtColor(img, img_gray, cv::COLOR_BGR2GRAY);
+      char file[1024];
+      sprintf(file, "../data/img/gray_block/%02d,%02d.jpg", j, i);
+      cv::imwrite(file, img);
+
+      img_gray.reshape(0, 1).convertTo(img_row, CV_32F);
+      img_row /= 255.0;
+      cv::vconcat(all_block, img_row, all_block);
+    }
+  }
+  // remove the first zero row which created while initialize
+  all_block = all_block.rowRange(1, all_block.rows);
+
+  cv::Mat result = this->classifier.predict(all_block);
+
+  for (int i = 0; i < result.rows; ++i)
+  {
+    double p = 0;
+    cv::Point max;
+    cv::minMaxLoc(result.rowRange(i, i + 1), NULL, &p, NULL, &max);
+    this->map.push_back(max.x);
+  }
+  for (int i = 0; i < map_height; ++i)
+  {
+    for (int j = 0; j < map_width; ++j)
+    {
+      int v = this->map[i * map_width + j];
+      char c;
+      if (v >= 0 && v < 9)
+      {
+        printf(" %d", v);
+      }
+      else if (v == 9)
+      {
+        printf(" *");
+      }
+      else if (v == 10)
+      {
+        printf("  ");
+      }
+    }
+    printf("\n");
+  }
 }
 
-std::vector<byte> Controller::get_map()
+std::vector<int> Controller::get_map()
 {
-  return std::vector<byte>();
+  cv::Mat screenshot = this->get_screenshot();
+  this->analyze_screenshot_map(screenshot);
+  return std::vector<int>();
 }
 
 void Controller::click(int x, int y)
 {
   focus();
-  int click_x = this->window_rect.left + this->block_size.first / 2 +
-                this->map_offset.first + x * this->block_size.first,
-      click_y = this->window_rect.top + this->block_size.second / 2 +
-                this->map_offset.second + x * this->block_size.second;
+  int click_x = this->window_rect.x + this->block_size.width / 2 +
+                this->map_rect.x + x * this->block_size.width,
+      click_y = this->window_rect.y + this->block_size.height / 2 +
+                this->map_rect.y + y * this->block_size.height;
   SetCursorPos(click_x, click_y);
   mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
   mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
@@ -201,20 +291,3 @@ void Controller::test()
   }
 }
 } // namespace minesweeper_solver
-
-int main()
-{
-  using namespace minesweeper_solver;
-  Controller c = Controller();
-  auto test = c.get_map();
-
-  c.click(0, 0);
-
-  // Sleep(100);
-  // for (int i = 0; i < 10 && GetForegroundWindow() == c.hm; ++i)
-  // {
-  //   cout << i << endl;
-  //   c.click(i, i);
-  //   Sleep(100);
-  // }
-}

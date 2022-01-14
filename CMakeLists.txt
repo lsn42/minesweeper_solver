@@ -1,23 +1,21 @@
 # CMake and project configuration
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.11)
 project(minesweeper_solver)
 
 # source files
-set(SOURCES ${PROJECT_SOURCE_DIR}/src/controller.cpp)
+file(GLOB SOURCES ${PROJECT_SOURCE_DIR}/src/main.cpp
+     ${PROJECT_SOURCE_DIR}/src/*.cpp)
 add_executable(minesweeper_solver ${SOURCES})
 
 # defined headers
-set(HEADERS ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/include
-            ${PROJECT_SOURCE_DIR}/src/util)
+file(GLOB HEADERS ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/include
+     ${PROJECT_SOURCE_DIR}/src/util)
 target_include_directories(minesweeper_solver PRIVATE ${HEADERS})
 
-# load libraries
+# load libraries OpenCV
 find_package(OpenCV 4 REQUIRED)
 if(OpenCV_FOUND)
-  message(STATUS "OpenCV library found")
-  message(STATUS "OpenCV_DIR = ${OpenCV_DIR}")
-  # message(STATUS "OpenCV_INCLUDE_DIRS = ${OpenCV_INCLUDE_DIRS}")
-  # message(STATUS "OpenCV_LIBS = ${OpenCV_LIBS}")
+  message(STATUS "OpenCV library found, OpenCV_DIR = ${OpenCV_DIR}")
   target_include_directories(minesweeper_solver PRIVATE ${OpenCV_INCLUDE_DIRS})
   target_link_libraries(minesweeper_solver ${OpenCV_LIBS})
 else(OpenCV_FOUND)

@@ -1,12 +1,11 @@
+#ifndef MINESWEEPER_SOLVER_CONTROLLER_HPP
+#define MINESWEEPER_SOLVER_CONTROLLER_HPP
 #include <windows.h>
 
 #include <opencv2/opencv.hpp>
 #include <vector>
 
 #include "ann.hpp"
-
-#ifndef CONTROLLER_HPP
-#define CONTROLLER_HPP
 namespace minesweeper_solver
 {
 class Controller

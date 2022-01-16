@@ -1,8 +1,8 @@
 // reference: https://blog.csdn.net/qq_37781464/article/details/112030900
+#ifndef MINESWEEPER_SOLVER_ANN_HPP
+#define MINESWEEPER_SOLVER_ANN_HPP
 #include <opencv2/opencv.hpp>
 #include <string>
-#ifndef ANN_HPP
-#define ANN_HPP
 
 static const std::string TRAIN_DATA = "../data/1";
 static const std::string SAVED_MODEL = "../model/mnist_ann.xml";

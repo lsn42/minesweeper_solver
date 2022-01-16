@@ -6,6 +6,7 @@
 #include <opencv2/opencv.hpp>
 #include <vector>
 
+#include "util/image.hpp"
 #include "util/util.hpp"
 
 namespace minesweeper_solver
@@ -197,6 +198,7 @@ void Controller::analyze_screenshot_dimension(const cv::Mat& s)
 
 void Controller::analyze_screenshot_map(const cv::Mat& screenshot)
 {
+  std::vector<int> map;
   int map_width = this->map_size.width, map_height = this->map_size.height;
   int map_offset_x = this->map_rect.x + 4, map_offset_y = this->map_rect.y + 4;
   int block_width = this->block_size.width,
@@ -204,26 +206,18 @@ void Controller::analyze_screenshot_map(const cv::Mat& screenshot)
 
   // initialize by creating zero row for the later operation of row concat
   // zero row will be removed after data loaded
-  cv::Mat all_block = cv::Mat::zeros(1, 14 * 14, CV_32F);
+  cv::Mat all_block = cv::Mat::zeros(1, 14 * 14 * 3, CV_32F);
   for (int i = 0; i < map_height; ++i)
   {
     for (int j = 0; j < map_width; ++j)
     {
-      cv::Mat img, img_gray, img_row;
+      cv::Mat img;
       img = screenshot(cv::Rect(map_offset_x + block_width * j,
         map_offset_y + block_height * i, block_width - 4, block_height - 4));
-      if (img.rows != 14 or img.cols != 14)
-      {
-        cv::resize(img, img, cv::Size(14, 14));
-      }
-      cv::cvtColor(img, img_gray, cv::COLOR_BGR2GRAY);
-      char file[1024];
-      sprintf(file, "../data/img/gray_block/%02d,%02d.jpg", j, i);
-      cv::imwrite(file, img);
-
-      img_gray.reshape(0, 1).convertTo(img_row, CV_32F);
-      img_row /= 255.0;
-      cv::vconcat(all_block, img_row, all_block);
+      // img = util::transform_and_save_image1(
+      //   img, "../data/img/gray_block", std::make_pair(j, i));
+      img = util::transform_image2(img);
+      cv::vconcat(all_block, img, all_block);
     }
   }
   // remove the first zero row which created while initialize
@@ -236,36 +230,16 @@ void Controller::analyze_screenshot_map(const cv::Mat& screenshot)
     double p = 0;
     cv::Point max;
     cv::minMaxLoc(result.rowRange(i, i + 1), NULL, &p, NULL, &max);
-    this->map.push_back(max.x);
+    map.push_back(max.x);
   }
-  for (int i = 0; i < map_height; ++i)
-  {
-    for (int j = 0; j < map_width; ++j)
-    {
-      int v = this->map[i * map_width + j];
-      char c;
-      if (v >= 0 && v < 9)
-      {
-        printf(" %d", v);
-      }
-      else if (v == 9)
-      {
-        printf(" *");
-      }
-      else if (v == 10)
-      {
-        printf("  ");
-      }
-    }
-    printf("\n");
-  }
+  this->map = map;
 }
 
 std::vector<int> Controller::get_map()
 {
   cv::Mat screenshot = this->get_screenshot();
   this->analyze_screenshot_map(screenshot);
-  return std::vector<int>();
+  return this->map;
 }
 
 void Controller::click(int x, int y)

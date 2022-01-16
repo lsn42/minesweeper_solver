@@ -1,12 +1,13 @@
+#ifndef MINESWEEPER_SOLVER_UTIL_HPP
+#define MINESWEEPER_SOLVER_UTIL_HPP
 #include <algorithm>
 #include <iostream>
 #include <vector>
-
 namespace minesweeper_solver
 {
 namespace util
 {
-  int get_majority_number(std::vector<int> list, int total_count)
+  inline int get_majority_number(std::vector<int> list, int total_count)
   {
     int* bucket = new int[total_count]();
     int max = 0;
@@ -26,3 +27,4 @@ namespace util
   }
 } // namespace util
 } // namespace minesweeper_solver
+#endif

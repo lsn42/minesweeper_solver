@@ -6,10 +6,12 @@
 #include <opencv2/opencv.hpp>
 #include <string>
 
+#include "util/image.hpp"
+
 namespace minesweeper_solver
 {
 
-ANN::ANN(): model()
+ANN::ANN()
 {
   intptr_t h_file = 0;
   struct _finddata_t file;
@@ -30,8 +32,8 @@ ANN::ANN(): model()
 void ANN::create_model()
 {
   cv::Ptr<cv::ml::ANN_MLP> model = cv::ml::ANN_MLP::create();
-  //定义模型的层次结构 输入层为14*14=196 隐藏层为8*8=64 输出层为11
-  cv::Mat layerSizes = (cv::Mat_<int>(1, 3) << 14 * 14, 8 * 8, 11);
+  //定义模型的层次结构 输入层为14*14*3=588 隐藏层为14*14=196、7*7=49 输出层为11
+  cv::Mat layerSizes = (cv::Mat_<int>(1, 4) << 14 * 14 * 3, 14 * 14, 7 * 7, 11);
   model->setLayerSizes(layerSizes);
   //设置参数更新为误差反向传播法
   model->setTrainMethod(cv::ml::ANN_MLP::BACKPROP, 0.001, 0.1);
@@ -74,7 +76,7 @@ cv::Ptr<cv::ml::TrainData> ANN::read_train_data(const std::string diretory)
 
   // initialize by creating zero row for the later operation of row concat
   // zero row will be removed after data loaded
-  cv::Mat images = cv::Mat::zeros(1, 14 * 14, CV_32F);
+  cv::Mat images = cv::Mat::zeros(1, 14 * 14 * 3, CV_32F);
   cv::Mat labels = cv::Mat::zeros(1, folders.size(), CV_32F);
   for (int i = 0; i < folders.size(); ++i)
   {
@@ -87,16 +89,7 @@ cv::Ptr<cv::ml::TrainData> ANN::read_train_data(const std::string diretory)
         {
           path = diretory + "/" + folders[i] + "/" + file.name;
           cv::Mat img = cv::imread(path);
-          // force size 14 * 14
-          if (img.rows != 14 or img.cols != 14)
-          {
-            cv::resize(img, img, cv::Size(14, 14));
-          }
-          // convert to gray image
-          cv::cvtColor(img, img, cv::COLOR_BGR2GRAY);
-          img.reshape(0, 1).convertTo(img, CV_32F);
-          // normalization
-          img /= 255.0;
+          img = util::transform_image2(img);
           cv::vconcat(images, img, images);
 
           cv::Mat r = cv::Mat::zeros(1, folders.size(), CV_32F);
@@ -110,8 +103,8 @@ cv::Ptr<cv::ml::TrainData> ANN::read_train_data(const std::string diretory)
   // remove the first zero row which created while initialize
   images = images.rowRange(1, images.rows);
   labels = labels.rowRange(1, labels.rows);
-  // printf("images:\trow: %d, col:%d\nlabels:\trow: %d, col:%d\n", images.rows,
-  //   images.cols, labels.rows, labels.cols);
+  printf("images:\trow: %d, col:%d\nlabels:\trow: %d, col:%d\n", images.rows,
+    images.cols, labels.rows, labels.cols);
   return cv::ml::TrainData::create(images, cv::ml::ROW_SAMPLE, labels);
 }
 

@@ -3,13 +3,11 @@ cmake_minimum_required(VERSION 3.11)
 project(minesweeper_solver)
 
 # source files
-file(GLOB SOURCES ${PROJECT_SOURCE_DIR}/src/main.cpp
-     ${PROJECT_SOURCE_DIR}/src/*.cpp)
+file(GLOB SOURCES ${PROJECT_SOURCE_DIR}/src/*.cpp)
 add_executable(minesweeper_solver ${SOURCES})
 
 # defined headers
-file(GLOB HEADERS ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/include
-     ${PROJECT_SOURCE_DIR}/src/util)
+file(GLOB HEADERS ${PROJECT_SOURCE_DIR}/include)
 target_include_directories(minesweeper_solver PRIVATE ${HEADERS})
 
 # load libraries OpenCV

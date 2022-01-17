@@ -6,13 +6,13 @@ int main()
   using namespace minesweeper_solver;
 
   Controller c = Controller();
-  auto map = c.get_map();
+  auto map = c.map();
 
-  for (int i = 0; i < c.map_size.height; ++i)
+  for (int i = 0; i < c.map_size().height; ++i)
   {
-    for (int j = 0; j < c.map_size.width; ++j)
+    for (int j = 0; j < c.map_size().width; ++j)
     {
-      int v = map[i * c.map_size.width + j];
+      int v = map[i * c.map_size().width + j];
       char c;
       if (v >= 0 && v < 9)
       {

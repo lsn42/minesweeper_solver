@@ -45,6 +45,7 @@ void ANN::create_model()
 
   this->model = model;
 }
+
 cv::Mat ANN::predict(cv::Mat in)
 {
   cv::Mat out;

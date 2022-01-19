@@ -41,24 +41,6 @@ namespace util
     result /= 255.0;
     return result;
   }
-  inline cv::Mat transform_and_save_image1(
-    cv::Mat image, std::string path, std::pair<int, int> location)
-  {
-    cv::Mat result = image.clone();
-    char file[1024];
-    sprintf(file, "%s/%02d,%02d.jpg", path, location.first, location.second);
-    if (result.rows != 14 or result.cols != 14)
-    {
-      cv::resize(result, result, cv::Size(14, 14));
-    }
-    cv::imwrite(file, image);
-    // convert to gray image
-    cv::cvtColor(result, result, cv::COLOR_BGR2GRAY);
-    result.reshape(0, 1).convertTo(result, CV_32F);
-    // normalization
-    result /= 255.0;
-    return result;
-  }
 } // namespace util
 } // namespace minesweeper_solver
 #endif

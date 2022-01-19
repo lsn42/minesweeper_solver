@@ -2,8 +2,11 @@
 
 #include <windows.h>
 
+#include <chrono>
 #include <cstdio>
+#include <iostream>
 #include <opencv2/opencv.hpp>
+#include <thread>
 #include <vector>
 
 #include "util/image.hpp"
@@ -12,11 +15,48 @@
 namespace minesweeper_solver
 {
 
-Controller::Controller():
-  handle_main(FindWindow(NULL, "Minesweeper")),
-  handle_inner(FindWindowEx(this->handle_main, NULL, "Static", NULL))
+Controller::Controller()
 {
+}
+
+Controller::~Controller()
+{
+  MessageBoxW(0, L"寄！", L"controller就要寄了", 0);
+  this->supervisor_running.set_value();
+  this->supervisor.join();
+}
+
+bool Controller::bind_game()
+{
+  // find handle
+  if (!(handle_main = FindWindow(NULL, "Minesweeper")))
+  {
+    _game_available = false;
+    return false;
+  }
+  if (!(handle_inner = FindWindowEx(this->handle_main, NULL, "Static", NULL)))
+  {
+    _game_available = false;
+    return false;
+  }
+  _game_available = true;
+
+  std::cout << this->window_rect() << std::endl;
+
   this->analyze_game_info(this->take_screenshot());
+  this->supervisor_running = std::promise<void>();
+  this->supervisor = std::thread(
+    [this]()
+    {
+      auto f = this->supervisor_running.get_future();
+      while (f.wait_for(std::chrono::milliseconds(SUPERVISE_INTERVAL)) ==
+             std::future_status::timeout)
+      {
+        this->analyze_game_info(this->take_screenshot());
+      }
+      return;
+    });
+  return true;
 }
 
 std::vector<int> Controller::map()
@@ -36,6 +76,34 @@ void Controller::click(int x, int y)
   SetCursorPos(click_x, click_y);
   mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
   mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+}
+
+void Controller::generate_train_data()
+{
+  cv::Mat s = this->take_screenshot();
+  cv::Size ms = this->_map_size;  // map size
+  cv::Rect mr = this->_map_rect;  // map rect
+  cv::Size b = this->_block_size; // block size
+  // remove border
+  int mox = this->_map_rect.x + 2; // map offset x
+  int moy = this->_map_rect.y + 2; // map offset y
+
+  for (int i = 0; i < ms.height; ++i)
+  {
+    for (int j = 0; j < ms.width; ++j)
+    {
+      cv::Mat img;
+      img = s(cv::Rect(mox + b.width * j + 2, moy + b.height * i + 2,
+        b.width - 4, b.height - 4));
+      if (img.rows != 14 or img.cols != 14)
+      {
+        cv::resize(img, img, cv::Size(14, 14));
+      }
+      char file[1024];
+      sprintf(file, "%s/%02d,%02d.jpg", GENERATED_TRAIN_DATA.c_str(), j, i);
+      cv::imwrite(file, img);
+    }
+  }
 }
 
 cv::Rect Controller::window_rect()
@@ -223,6 +291,10 @@ void Controller::analyze_game_info(const cv::Mat& screenshot)
   this->_block_size.width = round(this->_map_rect.width / (double)column);
   this->_block_size.height = round(this->_map_rect.height / (double)row);
   this->info_lock.unlock();
+  std::cout << "map_rect: " << this->map_rect() << "\n"
+            << "map_size: " << this->map_size() << "\n"
+            << "block_size: " << this->block_size() << "\n"
+            << std::endl;
 }
 
 void Controller::analyze_game_map(const cv::Mat& screenshot)

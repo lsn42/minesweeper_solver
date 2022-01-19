@@ -2,23 +2,32 @@
 #define MINESWEEPER_SOLVER_CONTROLLER_HPP
 #include <windows.h>
 
+#include <future>
 #include <mutex>
 #include <opencv2/opencv.hpp>
+#include <thread>
 #include <vector>
 
 #include "ann.hpp"
 
 namespace minesweeper_solver
 {
+
+static const std::string GENERATED_TRAIN_DATA = "../data/generate";
+static const int SUPERVISE_INTERVAL = 1000;
+
 class Controller
 {
  public:
   Controller();
-  ~Controller() = default;
+  ~Controller();
 
   cv::Rect const map_rect() { return this->_map_rect; }
   cv::Size const map_size() { return this->_map_size; }
   cv::Size const block_size() { return this->_block_size; }
+  bool const game_available() { return this->_game_available; }
+
+  bool bind_game();
 
   // get current game map
   std::vector<int> map();
@@ -33,6 +42,10 @@ class Controller
   void test();
 
  protected:
+  bool _game_available;
+  std::promise<void> supervisor_running;
+  std::thread supervisor;
+
   HWND handle_main;  // game process main handle
   HWND handle_inner; // inner window handle
   ANN classifier;

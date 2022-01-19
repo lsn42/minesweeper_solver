@@ -4,8 +4,8 @@
 #include <opencv2/opencv.hpp>
 #include <string>
 
-static const std::string TRAIN_DATA = "../data/1";
-static const std::string SAVED_MODEL = "../model/mnist_ann.xml";
+static const std::string TRAIN_DATA = "data/1";
+static const std::string SAVED_MODEL = "model/mnist_ann.xml";
 
 namespace minesweeper_solver
 {

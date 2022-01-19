@@ -15,54 +15,30 @@
 namespace minesweeper_solver
 {
 
-Controller::Controller()
+bool Controller::find_game()
 {
-}
-
-Controller::~Controller()
-{
-  MessageBoxW(0, L"寄！", L"controller就要寄了", 0);
-  this->supervisor_running.set_value();
-  this->supervisor.join();
-}
-
-bool Controller::bind_game()
-{
-  // find handle
   if (!(handle_main = FindWindow(NULL, "Minesweeper")))
   {
-    _game_available = false;
     return false;
   }
   if (!(handle_inner = FindWindowEx(this->handle_main, NULL, "Static", NULL)))
   {
-    _game_available = false;
     return false;
   }
-  _game_available = true;
-
-  std::cout << this->window_rect() << std::endl;
-
-  this->analyze_game_info(this->take_screenshot());
-  this->supervisor_running = std::promise<void>();
-  this->supervisor = std::thread(
-    [this]()
-    {
-      auto f = this->supervisor_running.get_future();
-      while (f.wait_for(std::chrono::milliseconds(SUPERVISE_INTERVAL)) ==
-             std::future_status::timeout)
-      {
-        this->analyze_game_info(this->take_screenshot());
-      }
-      return;
-    });
   return true;
 }
 
-std::vector<int> Controller::map()
+bool Controller::update_map()
 {
-  this->analyze_game_map(this->take_screenshot());
-  return this->_map;
+  if (!find_game())
+  {
+    return false;
+  }
+  focus();
+  cv::Mat screenshot = this->take_screenshot();
+  // TODO: validate screenshot
+  this->_map = this->analyze(screenshot).second;
+  return true;
 }
 
 void Controller::click(int x, int y)
@@ -81,12 +57,13 @@ void Controller::click(int x, int y)
 void Controller::generate_train_data()
 {
   cv::Mat s = this->take_screenshot();
-  cv::Size ms = this->_map_size;  // map size
-  cv::Rect mr = this->_map_rect;  // map rect
-  cv::Size b = this->_block_size; // block size
+  auto map = this->analyze(s);
+  cv::Rect mr = map.first.first;   // map rect
+  cv::Size b = map.first.second;   // block size
+  cv::Size ms = map.second.size(); // map size
   // remove border
-  int mox = this->_map_rect.x + 2; // map offset x
-  int moy = this->_map_rect.y + 2; // map offset y
+  int mox = mr.x + 2; // map offset x
+  int moy = mr.y + 2; // map offset y
 
   for (int i = 0; i < ms.height; ++i)
   {
@@ -143,47 +120,48 @@ cv::Mat Controller::take_screenshot()
   return screenshot;
 }
 
-void Controller::analyze_game_info(const cv::Mat& screenshot)
+std::pair<std::pair<cv::Rect, cv::Size>, cv::Mat> Controller::analyze(
+  const cv::Mat& screenshot)
 {
   // reference: https://blog.csdn.net/yomo127/article/details/52045146
   using namespace std;
   using namespace cv;
 
-  Rect w = this->window_rect();
+  cv::Rect map_rect;
+  cv::Size block_size;
+
+  int row = 0, column = 0;
+  cv::Mat map;
 
   /* step 1:
     get gray image and adaptive threshold image
   */
 
   Mat img_gray, img_threshold;
-  // get gray image
-  cvtColor(screenshot, img_gray, COLOR_BGR2GRAY);
-  // get adaptive threshold image form gray image
+  cvtColor(screenshot, img_gray, COLOR_BGR2GRAY); // get gray image
   adaptiveThreshold(~img_gray, img_threshold, 255, ADAPTIVE_THRESH_MEAN_C,
-    THRESH_BINARY, 15, -2);
+    THRESH_BINARY, 15, -2); // get adaptive threshold image form gray image
 
   /* step 2:
-    sperate horizontal and vertical line by applying erode then dilate
+    sperate horizontal and vertical line by applying erode then dilate to
+    threshold image
   */
 
   // define sperate line scale, the bigger the more lines would be detected
   int scale = 15;
-  Mat hl, vl; // horizontal and vertical line
-
+  Mat hl = img_threshold.clone(); // horizontal line
+  Mat vl = img_threshold.clone(); // vertical line
   // sperate horizontal line
-  hl = img_threshold.clone();
   Mat hs = getStructuringElement(MORPH_RECT, Size(hl.cols / scale, 1));
   erode(hl, hl, hs, Point(-1, -1));
   dilate(hl, hl, hs, Point(-1, -1));
-
   // sperate vertical line
-  vl = img_threshold.clone();
   Mat vs = getStructuringElement(MORPH_RECT, Size(1, vl.rows / scale));
   erode(vl, vl, vs, Point(-1, -1));
   dilate(vl, vl, vs, Point(-1, -1));
 
   /* step 3
-    get mask and joint for after operation
+    get mask and joint from horizontal and vertical line for later operation
   */
 
   Mat img_mask = hl + vl;
@@ -192,7 +170,7 @@ void Controller::analyze_game_info(const cv::Mat& screenshot)
   bitwise_and(hl, vl, img_joints);
 
   /* step 4
-    using findContours to find the game map location, set up map Rect
+    using findContours to find the game map location, set up map_rect
   */
 
   vector<vector<Point> > contours;
@@ -214,7 +192,7 @@ void Controller::analyze_game_info(const cv::Mat& screenshot)
       Mat roi = img_joints(bound_rect);
       vector<vector<Point> > joints_contours;
       findContours(roi, joints_contours, RETR_CCOMP, CHAIN_APPROX_SIMPLE);
-      //从表格的特性看，如果这片区域的点数小于4，那就代表没有一个完整的表格，忽略掉
+      // 从表格的特性看，如果这片区域的点数小于4，那就代表没有一个完整的表格，忽略掉
       if (joints_contours.size() > 4)
       {
         tables.push_back(bound_rect);
@@ -229,6 +207,7 @@ void Controller::analyze_game_info(const cv::Mat& screenshot)
       max = i;
     }
   }
+  map_rect = tables[max]; // set up map cv::Rect
 
   /* step 5
     get intersection joints from horizontal and vertical line, count them
@@ -238,8 +217,6 @@ void Controller::analyze_game_info(const cv::Mat& screenshot)
   // the gap between blocks, depended on the size of each block, introduce this
   // concept to cope with the joints clustered problem.
   int gap = 5;
-
-  int row, column;
 
   // counting horizontal joints for row count
   vector<int> counts;
@@ -260,9 +237,9 @@ void Controller::analyze_game_info(const cv::Mat& screenshot)
     }
   }
   // the most number of joints should be the row number
-  row = util::get_majority_number(counts, w.height) - 1;
+  row = util::get_majority_number(counts, screenshot.rows) - 1;
 
-  // counting vertical joints for column count
+  // counting vertical joints for column count, reuse the counts variable
   counts = vector<int>();
   for (int i = 0; i < img_joints.rows; ++i)
   {
@@ -281,78 +258,47 @@ void Controller::analyze_game_info(const cv::Mat& screenshot)
     }
   }
   // the most number of joints should be the column number
-  column = util::get_majority_number(counts, w.width) - 1;
+  column = util::get_majority_number(counts, screenshot.cols) - 1;
 
-  // set up variebles
-  this->info_lock.lock();
-  this->_map_rect = tables[max];
-  this->_map_size.width = column;
-  this->_map_size.height = row;
-  this->_block_size.width = round(this->_map_rect.width / (double)column);
-  this->_block_size.height = round(this->_map_rect.height / (double)row);
-  this->info_lock.unlock();
-  std::cout << "map_rect: " << this->map_rect() << "\n"
-            << "map_size: " << this->map_size() << "\n"
-            << "block_size: " << this->block_size() << "\n"
-            << std::endl;
-}
+  block_size.width = round(map_rect.width / (double)column);
+  block_size.height = round(map_rect.height / (double)row);
 
-void Controller::analyze_game_map(const cv::Mat& screenshot)
-{
-  std::vector<int> map;
-  // acquire and save info
-  this->info_lock.lock();
-  cv::Size ms = this->_map_size;  // map size
-  cv::Rect mr = this->_map_rect;  // map rect
-  cv::Size b = this->_block_size; // block size
-  this->info_lock.unlock();
+  /* step 6:
+   */
+
   // remove border
-  int mox = this->_map_rect.x + 2; // map offset x
-  int moy = this->_map_rect.y + 2; // map offset y
+  int mox = map_rect.x + 2; // map offset x
+  int moy = map_rect.y + 2; // map offset y
 
   // initialize by creating zero row for the later operation of row concat
   // zero row will be removed after data loaded
-  cv::Mat all_block = cv::Mat::zeros(1, 14 * 14 * 3, CV_32F);
-  for (int i = 0; i < ms.height; ++i)
+  Mat all_block = Mat::zeros(1, 14 * 14 * 3, CV_32F);
+  for (int i = 0; i < row; ++i)
   {
-    for (int j = 0; j < ms.width; ++j)
+    for (int j = 0; j < column; ++j)
     {
-      cv::Mat img;
-      //
-      img = screenshot(cv::Rect(mox + b.width * j + 2, moy + b.height * i + 2,
-        b.width - 4, b.height - 4));
-      // img = util::transform_and_save_image1(
-      //   img, "../data/img/gray_block", std::make_pair(j, i));
+      Mat img = screenshot(
+        Rect(mox + block_size.width * j + 2, moy + block_size.height * i + 2,
+          block_size.width - 4, block_size.height - 4));
       img = util::transform_image2(img);
-      cv::vconcat(all_block, img, all_block);
+      vconcat(all_block, img, all_block);
     }
   }
-  // remove the first zero row which created while initialize
+  // remove the first zero row created while initializing
   all_block = all_block.rowRange(1, all_block.rows);
 
   // use classifier to predict all the blocks
-  cv::Mat result = this->classifier.predict(all_block);
+  Mat result = this->classifier.predict(all_block);
 
+  map = Mat::zeros(row, column, CV_32S);
   // analyze result, use the maximum probability as the block value
   for (int i = 0; i < result.rows; ++i)
   {
-    cv::Point max;
-    cv::minMaxLoc(result.rowRange(i, i + 1), NULL, NULL, NULL, &max);
-    map.push_back(max.x);
+    Point max;
+    minMaxLoc(result.rowRange(i, i + 1), NULL, NULL, NULL, &max);
+    map.at<int>(i / column, i % column) = max.x;
   }
-
-  // verify info unchanged
-  this->info_lock.lock();
-  if (ms == this->_map_size && mr == this->_map_rect && b == this->_block_size)
-  { // unchanged, set up the map
-    this->info_lock.unlock();
-    this->_map = map;
-  }
-  else
-  { // changed, call this function again
-    this->info_lock.unlock();
-    this->analyze_game_map(screenshot);
-  }
+  return std::make_pair(std::make_pair(map_rect, block_size), map);
 }
 
 void Controller::test()
